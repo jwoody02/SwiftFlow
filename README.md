@@ -62,6 +62,87 @@ SwiftFlow.shared.addTask(networkTask)
 ```
 Tasks can be defined anywhere, all it takes is this one line to add the task to the queue and execute it again. Keep in mind, the task's `then` completion block will be called, you can update this completion block dynamically anywhere in your code as can be seen in the previous section `Creating a Task`.
 
+# Detailed Example
+To give an example of how useful SwiftFlow is, lets use it to execute a large number of http requests concurrently. I'm going to define a simple class to help us make requests with the default shared URLSession and a completion callback:
+```swift
+class HTTPClient {
+    static func makeRequest(to urlString: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let url = URL(string: urlString) else {
+            completion(.failure(URLError(.badURL)))
+            return
+        }
+
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+
+            guard let data = data, let responseString = String(data: data, encoding: .utf8) else {
+                completion(.failure(URLError(.cannotParseResponse)))
+                return
+            }
+
+            completion(.success(responseString))
+        }
+
+        task.resume()
+    }
+}
+class ExampleClass() {
+    func executeExample() {
+        // Example usage of SwiftFlow with HTTP request tasks
+        
+        // 1. Define the HTTP request task
+        func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Result<String, Error>> {
+            let task = Task<Result<String, Error>>(identifier: UUID().uuidString, priority: priority) { completion in
+                HTTPClient.makeRequest(to: urlString) { result in
+                    completion(.success(result))
+                }
+            }
+        
+            // Handle the task completion
+            task.then { result, metrics in
+                switch result {
+                case .success(let response):
+                    print("Success: \(response)")
+                case .failure(let error):
+                    print("Error: \(error.localizedDescription)")
+                }
+                print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
+            }
+        
+            return task
+        }
+        
+        // 2. Add tasks to SwiftFlow
+        let urls = [
+            "https://api.publicapis.org/entries",      // Public APIs list
+            "https://api.agify.io/?name=bella",        // Age prediction
+            "https://api.genderize.io/?name=lucy",     // Gender prediction
+            "https://api.nationalize.io/?name=nathaniel", // Nationality prediction
+            "https://catfact.ninja/fact",              // Random cat facts
+            "https://dog.ceo/api/breeds/image/random", // Random dog images
+            "https://api.coinpaprika.com/v1/tickers",  // Cryptocurrency tickers
+            "https://api.coindesk.com/v1/bpi/currentprice.json", // Bitcoin Price Index
+            "https://api.quotable.io/random",          // Random quotes
+            "https://api.zippopotam.us/us/90210",      // US Zip Code Lookup
+            "https://pokeapi.co/api/v2/pokemon/ditto", // Pokémon information
+            "https://api.funtranslations.com/translate/yoda.json?text=Master+Yoda", // Fun translations
+            // Add more as needed
+        ]
+        urls.forEach { urlString in
+            let httpRequestTask = createHTTPRequestTask(urlString: urlString, priority: .medium)
+            SwiftFlow.shared.addTask(httpRequestTask)
+        }
+        
+        // Optional: Debug print the queue status
+        SwiftFlow.shared.debugPrintQueueStatus()
+
+}
+}
+```
+
 # Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
 
