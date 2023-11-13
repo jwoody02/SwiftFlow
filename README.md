@@ -53,6 +53,8 @@ networkTask.then { result, metrics in
     print("Execution Time: \(metrics.executionTime)")
 }
 ```
+PLEASE NOTE: simply creating a task will not add it to the task queue. All that we've done in the above example is define the code for a certain task, and what should be done upon its completion. To actually execute a task, use the `addTask` function as shown in the section below.
+
 # Adding a Task to the Task Manager
 Add your task to the TaskManager for execution:
 ```swift
@@ -67,7 +69,7 @@ SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at
  - Initial Ideal Time: Set to a default value (e.g., 2 seconds).
  - Success Rate Calculation: The percentage of tasks completing within the ideal time is calculated.
  - Adjusting Ideal Time:
-   - If the success rate is above a threshold (e.g., 80%), the ideal time is increased.
+   - The ideal time is increased if the success rate is above a threshold (e.g., 80%).
    - If the success rate is below the threshold, the ideal time is decreased.
  - Concurrency Adjustment:
    - Increase concurrency if the success rate is high. Aka: allow more tasks to run at once.
