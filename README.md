@@ -20,8 +20,8 @@ git clone https://github.com/yourusername/SwiftFlow.git
 ```
 copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 
-## Usage
-# Creating a Task
+# Usage
+## Creating a Task
 To create a task, define the task execution block and initialize a `Task` object:
 ```swift
 // Create a network task with a unique identifier, give it medium priority
@@ -55,17 +55,17 @@ networkTask.then { result, metrics in
 ```
 PLEASE NOTE: simply creating a task will not add it to the task queue. All that we've done in the above example is define the code for a certain task, and what should be done upon its completion. To actually execute a task, use the `addTask` function as shown in the section below.
 
-# Adding a Task to the Task Manager
+## Executing a Task
 Add your task to the TaskManager for execution:
 ```swift
 SwiftFlow.shared.addTask(networkTask)
 ```
 Tasks can be defined anywhere, all it takes is this one line to add the task to the queue and execute it again. Keep in mind, the task's `then` completion block will be called, you can update this completion block dynamically anywhere in your code as can be seen in the previous section `Creating a Task`.
 
-## Concurrency Adjustment Mechanism
+# Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
 
-# How It Works
+## How It Works
  - Initial Ideal Time: Set to a default value (e.g., 2 seconds).
  - Success Rate Calculation: The percentage of tasks completing within the ideal time is calculated.
  - Adjusting Ideal Time:
