@@ -65,6 +65,8 @@ Tasks can be defined anywhere, all it takes is this one line to add the task to 
 # Detailed Example
 To give an example of how useful SwiftFlow is, lets use it to execute a large number of http requests concurrently. I'm going to define a simple class to help us make requests with the default shared URLSession and a completion callback:
 ```swift
+
+// Simple class to make requests and return the responses as a Result via a escaping completion
 class HTTPClient {
     static func makeRequest(to urlString: String, completion: @escaping (Result<String, Error>) -> Void) {
         guard let url = URL(string: urlString) else {
@@ -89,49 +91,44 @@ class HTTPClient {
         task.resume()
     }
 }
+
 class ExampleClass() {
+    // 1. Define the HTTP request task
+    // This is an example of how you can create functions that help programmatically define tasks
+    // In this example, this function creates a http request task and can easily be used to create an infinite number of new HTTP tasks
+    func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Result<String, Error>> {
+        let task = Task<Result<String, Error>>(identifier: UUID().uuidString, priority: priority) { completion in
+            HTTPClient.makeRequest(to: urlString) { result in
+                completion(.success(result))
+            }
+        }
+    
+        // Handle the task completion
+        task.then { result, metrics in
+            switch result {
+            case .success(let response):
+                print("Success: \(response)")
+            case .failure(let error):
+                print("Error: \(error.localizedDescription)")
+            }
+            print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
+        }
+    
+        return task
+    }
+
+
     func executeExample() {
         // Example usage of SwiftFlow with HTTP request tasks
-        
-        // 1. Define the HTTP request task
-        func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Result<String, Error>> {
-            let task = Task<Result<String, Error>>(identifier: UUID().uuidString, priority: priority) { completion in
-                HTTPClient.makeRequest(to: urlString) { result in
-                    completion(.success(result))
-                }
-            }
-        
-            // Handle the task completion
-            task.then { result, metrics in
-                switch result {
-                case .success(let response):
-                    print("Success: \(response)")
-                case .failure(let error):
-                    print("Error: \(error.localizedDescription)")
-                }
-                print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
-            }
-        
-            return task
-        }
-        
+
         // 2. Add tasks to SwiftFlow
         let urls = [
             "https://api.publicapis.org/entries",      // Public APIs list
             "https://api.agify.io/?name=bella",        // Age prediction
-            "https://api.genderize.io/?name=lucy",     // Gender prediction
-            "https://api.nationalize.io/?name=nathaniel", // Nationality prediction
-            "https://catfact.ninja/fact",              // Random cat facts
-            "https://dog.ceo/api/breeds/image/random", // Random dog images
-            "https://api.coinpaprika.com/v1/tickers",  // Cryptocurrency tickers
-            "https://api.coindesk.com/v1/bpi/currentprice.json", // Bitcoin Price Index
-            "https://api.quotable.io/random",          // Random quotes
-            "https://api.zippopotam.us/us/90210",      // US Zip Code Lookup
-            "https://pokeapi.co/api/v2/pokemon/ditto", // Pokémon information
-            "https://api.funtranslations.com/translate/yoda.json?text=Master+Yoda", // Fun translations
             // Add more as needed
         ]
         urls.forEach { urlString in
+            // create a task for each url in the array and add the task to the queue
             let httpRequestTask = createHTTPRequestTask(urlString: urlString, priority: .medium)
             SwiftFlow.shared.addTask(httpRequestTask)
         }
