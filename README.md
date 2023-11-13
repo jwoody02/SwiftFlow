@@ -24,9 +24,10 @@ copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 # Creating a Task
 To create a task, define the task execution block and initialize a `Task` object:
 ```swift
-# Create a network task with a unique identifier, give it medium priority
-# Tasks can be given different priority levels depending on their importance
-# more important tasks will be placed ahead of lower priority tasks
+// Create a network task with a unique identifier, give it medium priority
+// Tasks can be given different priority levels depending on their importance
+// more important tasks will be placed ahead of lower priority tasks
+
 let networkTask = Task<String>(identifier: "networkRequest", priority: .medium) { completion in
     // Asynchronous network request
     someNetworkRequest { result, error in
@@ -40,9 +41,9 @@ let networkTask = Task<String>(identifier: "networkRequest", priority: .medium) 
     }
 }
 
-# Handle task completion
+// Handle task completion
 networkTask.then { result, metrics in
-    # this will be called when the task is done, do what you want with the result of the code, or keep track of metrics to optimize in the future.
+    // this will be called when the task is done, do what you want with the result of the code, or keep track of metrics to optimize in the future.
     switch result {
     case .success(let data):
         print("Data: \(data)")
