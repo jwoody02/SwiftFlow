@@ -1,6 +1,6 @@
 # SwiftFlow
 
-![SwiftFlow Logo](path_to_logo_image)
+![SwiftFlow Logo](documentation/swiftflowLogo.png)
 
 SwiftFlow is an advanced task management system for Swift, designed to handle concurrent tasks with dynamic performance adjustment efficiently. It uses an adaptive algorithm to optimize task execution based on system load and task performance, ensuring smooth and efficient task handling.
 
