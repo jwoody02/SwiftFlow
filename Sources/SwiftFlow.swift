@@ -9,17 +9,17 @@ import Foundation
 // Task Priority with Aging Mechanism
 enum TaskPriority: Int, Comparable {
     case veryLow = 0, low, medium, high, veryHigh
-    
+
     mutating func age() {
-        if self.rawValue < TaskPriority.veryHigh.rawValue {
-            self = TaskPriority(rawValue: self.rawValue + 1)!
-        }
+        guard let higherPriority = TaskPriority(rawValue: rawValue + 1) else { return }
+        self = higherPriority
     }
-    
+
     static func < (lhs: TaskPriority, rhs: TaskPriority) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 }
+
 
 // Task Result
 enum TaskResult<ResultType> {
@@ -48,28 +48,55 @@ protocol TaskProtocol {
     func execute(completion: @escaping () -> Void)
 }
 
+class TaskBuilder<ResultType> {
+    private var identifier: String = UUID().uuidString
+    private var priority: TaskPriority = .medium
+    private var executionBlock: (@escaping (TaskResult<ResultType>) -> Void) -> Void = { _ in }
+    private var completions: [(TaskResult<ResultType>, TaskMetrics) -> Void] = []
+
+    func with(identifier: String) -> TaskBuilder {
+        self.identifier = identifier
+        return self
+    }
+
+    func with(priority: TaskPriority) -> TaskBuilder {
+        self.priority = priority
+        return self
+    }
+
+    func with(executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void) -> TaskBuilder {
+        self.executionBlock = executionBlock
+        return self
+    }
+
+    func then(completion: @escaping (TaskResult<ResultType>, TaskMetrics) -> Void) -> TaskBuilder {
+        completions.append(completion)
+        return self
+    }
+
+    func build() -> Task<ResultType> {
+        return Task(identifier: identifier, priority: priority, executionBlock: executionBlock, completions: completions)
+    }
+}
+
+
 // Unified Task
 class Task<ResultType>: TaskProtocol {
     let identifier: String
     var priority: TaskPriority
     let creationTime: TimeInterval
     var executionBlock: (@escaping (TaskResult<ResultType>) -> Void) -> Void
-    var completion: ((TaskResult<ResultType>, TaskMetrics) -> Void)?
-    let executionQueue: DispatchQueue
-    
-    init(identifier: String, priority: TaskPriority, executionQueue: DispatchQueue = .global(), executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void) {
+    var completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]
+    let executionQueue: DispatchQueue = .global()
+
+    init(identifier: String, priority: TaskPriority, executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void, completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]) {
         self.identifier = identifier
         self.priority = priority
         self.executionBlock = executionBlock
-        self.executionQueue = executionQueue
+        self.completions = completions
         self.creationTime = ProcessInfo.processInfo.systemUptime
     }
-    
-    func then(completion: @escaping (TaskResult<ResultType>, TaskMetrics) -> Void) -> Task {
-        self.completion = completion
-        return self
-    }
-    
+
     func execute(completion: @escaping () -> Void) {
         let startTime = ProcessInfo.processInfo.systemUptime
         let waitTime = startTime - creationTime
@@ -80,11 +107,12 @@ class Task<ResultType>: TaskProtocol {
                 let endTime = ProcessInfo.processInfo.systemUptime
                 let executionTime = endTime - startTime
                 let turnaroundTime = endTime - self.creationTime
-                
                 let metrics = TaskMetrics(waitTime: waitTime, executionTime: executionTime, turnaroundTime: turnaroundTime)
                 
                 DispatchQueue.main.async {
-                    self.completion?(result, metrics)
+                    self.completions.forEach { completion in
+                        completion(result, metrics)
+                    }
                     completion()
                 }
             }
@@ -273,5 +301,3 @@ class SwiftFlow {
         }
     }
 }
-
-
