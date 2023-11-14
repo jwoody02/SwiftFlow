@@ -271,6 +271,68 @@ class ExampleClass {
 ```
 In this example, `ExampleClass` demonstrates how to use SwiftFlow to handle multiple HTTP requests concurrently. Each request is encapsulated in a task with its own completion logic. The tasks are then queued and executed efficiently by SwiftFlow.
 
+## Detailed Example: Self-Starting Image Downloading with Caching Task
+```swift
+// Image download task that returns a UIImage and handles automatic caching
+class ImageDownloadTask: Task<UIImage> {
+    let imageURL: URL
+
+    init(imageURL: URL, priority: TaskPriority, autoEnqueue: Bool = true, completion: @escaping (TaskResult<UIImage>, TaskMetrics) -> Void) {
+        self.imageURL = imageURL
+        super.init(
+            identifier: "image-download-\(imageURL.absoluteString)",
+            priority: priority,
+            executionBlock: { taskCompletion in
+                // Check if the image is cached
+                if let cachedResponse = URLCache.shared.cachedResponse(for: URLRequest(url: imageURL)),
+                   let image = UIImage(data: cachedResponse.data) {
+                    taskCompletion(.success(image))
+                } else {
+                    // If not cached, download the image
+                    URLSession.shared.dataTask(with: imageURL) { data, response, error in
+                        if let error = error {
+                            taskCompletion(.failure(error))
+                            return
+                        }
+
+                        guard let data = data, let image = UIImage(data: data), let response = response else {
+                            taskCompletion(.failure(TaskError.noResult))
+                            return
+                        }
+
+                        // Cache the downloaded image
+                        let cachedData = CachedURLResponse(response: response, data: data)
+                        URLCache.shared.storeCachedResponse(cachedData, for: URLRequest(url: imageURL))
+
+                        taskCompletion(.success(image))
+                    }.resume()
+                }
+            },
+            completions: completion
+        )
+
+        if autoEnqueue {
+            SwiftFlow.shared.addTask(self)
+        }
+    }
+}
+
+// Example usage, no need to manually add it to the queue
+// This task will automatically run if autoEnqueue is set to true
+ImageDownloadTask(
+    imageURL: URL(string: "https://example.com/image.jpg")!,
+    priority: .high,
+    completion: { result, metrics in
+        switch result {
+        case .success(let image):
+            // Use the image in your app
+            print("Image downloaded or fetched from cache successfully")
+        case .failure(let error):
+            print("Image download failed: \(error)")
+        }
+    }
+)
+```
 # Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
 
