@@ -333,6 +333,8 @@ ImageDownloadTask(
     }
 )
 ```
+I don't recommend using this exact code in a production application, as its only a basic downloading and caching mechanism, however, in conjunction with `KingFisher` or some other framework more akin to efficiently downloading images, it would work well.
+
 # Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
 
