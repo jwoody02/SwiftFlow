@@ -229,63 +229,33 @@ class FileIOTask: Task<Data> {
 ```
 
 # Detailed Example: Concurrent HTTP Requests
-There's a practical example using SwiftFlow to manage concurrent HTTP requests:
+There's a practical example using SwiftFlow to manage concurrent HTTP requests using our `NetworkRequestTask` as defined above. Note: if you use this example, please make sure to include the network request task code above:
 ```swift
-class HTTPClient {
-    static func makeRequest(to urlString: String, completion: @escaping (Result<String, Error>) -> Void) {
-        guard let url = URL(string: urlString) else {
-            completion(.failure(URLError(.badURL)))
-            return
-        }
-
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
-            if let error = error {
-                completion(.failure(error))
-                return
-            }
-
-            guard let data = data, let responseString = String(data: data, encoding: .utf8) else {
-                completion(.failure(URLError(.cannotParseResponse)))
-                return
-            }
-
-            completion(.success(responseString))
-        }
-
-        task.resume()
-    }
-}
 
 class ExampleClass {
-    func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Result<String, Error>> {
-        let task = TaskBuilder<Result<String, Error>>()
-            .with(identifier: UUID().uuidString)
-            .with(priority: priority)
-            .with(executionBlock: { taskCompletion in
-                HTTPClient.makeRequest(to: urlString) { result in
-                    // Wrap the standard Result in a TaskResult
-                    let taskResult: TaskResult<Result<String, Error>> = .success(result)
-                    taskCompletion(taskResult)
-                }
-            })
-            .then { taskResult, metrics in
-                // Handle the task result and metrics
-                switch taskResult {
-                case .success(let result):
-                    switch result {
-                    case .success(let response):
-                        print("Success: \(response)")
-                    case .failure(let error):
-                        print("Error: \(error.localizedDescription)")
-                    }
-                case .failure(let error):
-                    print("Task Error: \(error)")
-                }
-                print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
-            }
-            .build()
+    func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Data> {
+        
+        // Example Usage
+        let request = URLRequest(url: URL(string: urlString)!)
 
-        return task
+        // Add additional request configurations if necessary (e.g., headers, body)
+
+        let networkTask = NetworkRequestTask(
+            urlRequest: request,
+            priority: priority,
+            completions: { result, metrics in
+                switch result {
+                case .success(let data):
+                    // Handle successful network response
+                    print("Successfully executed task requesting \(urlString)")
+                case .failure(let error):
+                    // Handle error scenario
+                    print("Failed to execute task requesting \(urlString)")
+                }
+            }
+        )
+        
+        return networkTask
     }
 
     func executeExample() {
