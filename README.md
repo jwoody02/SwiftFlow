@@ -221,9 +221,9 @@ SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at
    - Decrease concurrency if the success rate is low. Aka: decrease the amount of allowed tasks at once
   
 Below is an example diagram of how the mechanism works over time, as the number of tasks that complete in the target time increases, then that means we can allow more tasks to execute concurrently without slowing down the application:
-    - Note: that the "Concurrency Level" is a numerical representation for the number of tasks that are allowed to execute at the same time
-    - Over time, if tasks complete quick enough, the amount of tasks allowed at the same time will increase, and vice versa
-    - In layman's terms: SwiftFlow will execute as many tasks concurrently as possible while still ensuring that latency is kept at a minimal level
+ - Note: that the "Concurrency Level" is a numerical representation for the number of tasks that are allowed to execute at the same time
+ - Over time, if tasks complete quick enough, the amount of tasks allowed at the same time will increase, and vice versa
+ - In layman's terms: SwiftFlow will execute as many tasks concurrently as possible while still ensuring that latency is kept at a minimal level
     
 ![Diagram](documentation/concurrencyprocess.png)
 
