@@ -81,7 +81,8 @@ SwiftFlow.shared.addListener(for: "your-task-id") { result in
 }
 ```
 This feature is particularly useful for tasks that have wide-reaching effects or need to notify multiple components upon completion.
-# Example: Image Downloading Task
+# Task Classes
+## Example: Image Downloading Task
 SwiftFlow allows tasks to be easily defined as a class, making for easy initialization and clean code, here's an example of a Task class for downloading images:
 ```swift
 class ImageDownloadTask: Task<Data> {
@@ -133,7 +134,7 @@ let imageDownloadTask = ImageDownloadTask(
     )
     SwiftFlow.shared.addTask(imageDownloadTask)
 ```
-# Example: HTTP Requester Task
+## Example: HTTP Requester Task
 ```swift
 class NetworkRequestTask: Task<Data> {
     let urlRequest: URLRequest
@@ -176,7 +177,7 @@ class NetworkRequestTask: Task<Data> {
 }
 ```
 
-# Example: I/O Task
+## Example: I/O Task
 ```swift
 class FileIOTask: Task<Data> {
     let filePath: String
