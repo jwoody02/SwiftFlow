@@ -24,35 +24,27 @@ copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 ## Creating a Task
 To create a task, define the task execution block and initialize a `Task` object:
 ```swift
-// Create a network task with a unique identifier, give it medium priority
-// Tasks can be given different priority levels depending on their importance
-// more important tasks will be placed ahead of lower priority tasks
-
-let networkTask = Task<String>(identifier: "networkRequest", priority: .medium) { completion in
-    // Asynchronous network request
-    someNetworkRequest { result, error in
-        if let error = error {
-            completion(.failure(error))
-        } else if let result = result {
-            completion(.success(result))
-        } else {
-            completion(.failure(TaskError.noResult))
-        }
-    }
+// define a task. Make note: You should define what kind of objects will be passed back into the completion callback
+// in this example, you'd replace {return_type} with a list of the actual types of objects you want to pass into the "then" block further down
+let task = Task<{return_type}>(identifier: {give the task a unique string identifier), priority: {priority}) { completion in
+    // Any code you put here will run whenever this task executes
+    // to indicate completion of the task, please use the Result object and call completion(.success()) or .error
 }
 
-// Handle task completion
-networkTask.then { result, metrics in
+// define what should happen after a task completes
+task.then { result, metrics in
     // this will be called when the task is done, do what you want with the result of the code, or keep track of metrics to optimize in the future.
     switch result {
     case .success(let data):
-        print("Data: \(data)")
+        // keep in mind data will be the return type defined when you made the task
     case .failure(let error):
         print("Error: \(error)")
     }
+    // get information on how quickly the task executed
     print("Execution Time: \(metrics.executionTime)")
 }
 ```
+
 PLEASE NOTE: simply creating a task will not add it to the task queue. All that we've done in the above example is define the code for a certain task, and what should be done upon its completion. To actually execute a task, use the `addTask` function as shown in the section below.
 
 ## Executing a Task
