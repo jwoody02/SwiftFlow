@@ -276,7 +276,7 @@ In this example, `ExampleClass` demonstrates how to use SwiftFlow to handle mult
 // Image download task that returns a UIImage and handles automatic caching
 class ImageDownloadTask: Task<UIImage> {
     let imageURL: URL
-
+    
     init(imageURL: URL, priority: TaskPriority, autoEnqueue: Bool = true, completion: @escaping (TaskResult<UIImage>, TaskMetrics) -> Void) {
         self.imageURL = imageURL
         super.init(
@@ -294,23 +294,23 @@ class ImageDownloadTask: Task<UIImage> {
                             taskCompletion(.failure(error))
                             return
                         }
-
+                        
                         guard let data = data, let image = UIImage(data: data), let response = response else {
                             taskCompletion(.failure(TaskError.noResult))
                             return
                         }
-
+                        
                         // Cache the downloaded image
                         let cachedData = CachedURLResponse(response: response, data: data)
                         URLCache.shared.storeCachedResponse(cachedData, for: URLRequest(url: imageURL))
-
+                        
                         taskCompletion(.success(image))
                     }.resume()
                 }
             },
-            completions: completion
+            completions: [completion]
         )
-
+        
         if autoEnqueue {
             SwiftFlow.shared.addTask(self)
         }
@@ -321,7 +321,7 @@ class ImageDownloadTask: Task<UIImage> {
 // This task will automatically run if autoEnqueue is set to true
 ImageDownloadTask(
     imageURL: URL(string: "https://example.com/image.jpg")!,
-    priority: .high,
+    priority: .low,
     completion: { result, metrics in
         switch result {
         case .success(let image):
