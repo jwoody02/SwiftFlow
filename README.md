@@ -81,7 +81,7 @@ SwiftFlow.shared.addListener(for: "your-task-id") { result in
 }
 ```
 This feature is particularly useful for tasks that have wide-reaching effects or need to notify multiple components upon completion.
-# Detailed Example: Image Downloading Task
+# Example: Image Downloading Task
 SwiftFlow allows tasks to be easily defined as a class, making for easy initialization and clean code, here's an example of a Task class for downloading images:
 ```swift
 class ImageDownloadTask: Task<Data> {
@@ -133,7 +133,79 @@ let imageDownloadTask = ImageDownloadTask(
     )
     SwiftFlow.shared.addTask(imageDownloadTask)
 ```
+# Example: HTTP Requester Task
+```swift
+class NetworkRequestTask: Task<Data> {
+    let urlRequest: URLRequest
 
+    init(urlRequest: URLRequest, priority: TaskPriority, completions: @escaping (TaskResult<Data>, TaskMetrics) -> Void) {
+        self.urlRequest = urlRequest
+        super.init(
+            identifier: "NetworkRequest-\(urlRequest.url?.absoluteString ?? "unknown")",
+            priority: priority,
+            executionBlock: { completion in
+                let session = URLSession.shared
+                let task = session.dataTask(with: urlRequest) { data, response, error in
+                    // Handle errors
+                    if let error = error {
+                        completion(.failure(error))
+                        return
+                    }
+
+                    // Validate the response
+                    guard let httpResponse = response as? HTTPURLResponse,
+                          200..<300 ~= httpResponse.statusCode else {
+                        completion(.failure(TaskError.noResult))
+                        return
+                    }
+
+                    // Ensure data is received
+                    guard let data = data else {
+                        completion(.failure(TaskError.noResult))
+                        return
+                    }
+
+                    // Success
+                    completion(.success(data))
+                }
+                task.resume()
+            },
+            completions: [completions]
+        )
+    }
+}
+```
+
+# Example: I/O Task
+```swift
+class FileIOTask: Task<Data> {
+    let filePath: String
+    let operation: FileIOOperation
+
+    enum FileIOOperation {
+        case read
+        case write(data: Data)
+    }
+
+    init(filePath: String, operation: FileIOOperation, priority: TaskPriority) {
+        self.filePath = filePath
+        self.operation = operation
+        super.init(
+            identifier: "FileIO-\(filePath)",
+            priority: priority,
+            executionBlock: { completion in
+                switch operation {
+                case .read:
+                    // Implement file read logic
+                case .write(let data):
+                    // Implement file write logic
+                }
+            },
+            completions: []
+        )
+    }
+}
+```
 # Detailed Example: Concurrent HTTP Requests
 There's a practical example using SwiftFlow to manage concurrent HTTP requests:
 ```swift
