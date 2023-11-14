@@ -55,7 +55,7 @@ protocol TaskProtocol {
     var identifier: String { get }
     var priority: TaskPriority { get set }
     var creationTime: TimeInterval { get }
-    func execute(completion: @escaping () -> Void)
+    func executeInQueue(completion: @escaping () -> Void)
 }
 
 /// Builder for creating tasks with configurable properties.
@@ -114,17 +114,11 @@ class Task<ResultType>: TaskProtocol {
         self.creationTime = ProcessInfo.processInfo.systemUptime
     }
     
-    /// Executes the task, discarding any result. Used for fire-and-forget scenarios.
-    func execute() {
-       execute(completion: {})
-    }
-
-    /// Executes the task with a completion block.
-    /// - Calls the execution block and then all completion handlers with metrics.
-    func execute(completion: @escaping () -> Void) {
+    /// Executes the task as part of the managed queue
+    func executeInQueue(completion: @escaping () -> Void = {}) {
         let startTime = ProcessInfo.processInfo.systemUptime
         let waitTime = startTime - creationTime
-        
+
         executionQueue.async { [weak self] in
             guard let self = self else { return }
             self.executionBlock { result in
@@ -142,6 +136,26 @@ class Task<ResultType>: TaskProtocol {
             }
         }
     }
+    
+    /// Executes the task directly.
+    func execute(completion: @escaping () -> Void = {}) {
+        let startTime = ProcessInfo.processInfo.systemUptime
+        let waitTime = startTime - creationTime
+        self.executionBlock { result in
+            let endTime = ProcessInfo.processInfo.systemUptime
+            let executionTime = endTime - startTime
+            let turnaroundTime = endTime - self.creationTime
+            let metrics = TaskMetrics(waitTime: waitTime, executionTime: executionTime, turnaroundTime: turnaroundTime)
+            
+            DispatchQueue.main.async {
+                self.completions.forEach { completion in
+                    completion(result, metrics)
+                }
+                completion()
+            }
+        }
+    }
+    
 }
 
 
@@ -173,7 +187,7 @@ class AnyTask: AnyTaskProtocol {
         _identifier = task.identifier
         _priority = task.priority
         _creationTime = task.creationTime
-        _execute = task.execute
+        _execute = task.executeInQueue
     }
 
     /// Executes the wrapped task.
