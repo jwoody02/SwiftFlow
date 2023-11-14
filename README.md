@@ -228,7 +228,7 @@ class FileIOTask: Task<Data> {
 }
 ```
 
-# Detailed Example: Concurrent HTTP Requests
+## Detailed Example: Concurrent HTTP Requests
 There's a practical example using SwiftFlow to manage concurrent HTTP requests using our `NetworkRequestTask` as defined above. Note: if you use this example, please make sure to include the network request task code above:
 ```swift
 
