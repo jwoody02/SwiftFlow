@@ -54,6 +54,15 @@ SwiftFlow.shared.addTask(networkTask)
 ```
 Tasks can be defined anywhere, all it takes is this one line to add the task to the queue and execute it again. Keep in mind, the task's `then` completion block will be called, you can update this completion block dynamically anywhere in your code as can be seen in the previous section `Creating a Task`.
 
+## Multiple Listeners
+A cool aspect of SwiftFlow is you can add multiple listeners for a task given an id. For example, if you have multiple classes that need to be notified whenever a task of a certain id has executed, all you need to do is add a listener using `addListener`, here's an example:
+```swift
+SwiftFlow.shared.addListener(for: "your-task-id") { result in
+    self.handleTaskResult(result)
+}
+```
+Another way to think about listeners is as a way to have multiple `.then` listeners if multiple different things need to happen when a certain task completes.
+
 # Detailed Example
 To give an example of how useful SwiftFlow is, lets use it to execute a large number of http requests concurrently. I'm going to define a simple class to help us make requests with the default shared URLSession and a completion callback:
 ```swift
