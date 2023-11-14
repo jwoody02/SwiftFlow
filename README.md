@@ -22,9 +22,9 @@ copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 
 # Usage
 ## Creating a Task
-To create a task in SwiftFlow, you define the task's execution logic and specify completion handlers:
+To create a task in SwiftFlow, create a new `TaskBuilder` instance and make sure to pass in the return type (e.g. String, Data, etc). Place any code the task should complete in the `executionBlock`and call `completion(<return value>)` when done. `.then` is an optional function that is chainable, similar to JavaScript's `.then` function, and make sure to call `.build` at the end:
 ```swift
-let task = TaskBuilder<{return types}>()
+let task = TaskBuilder<ReturnType>()
     .with(identifier: "uniqueTaskIdentifier")
     .with(priority: .medium)
     .with(executionBlock: { completion in
