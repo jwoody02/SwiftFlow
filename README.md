@@ -175,6 +175,26 @@ class NetworkRequestTask: Task<Data> {
         )
     }
 }
+
+// Example Usage
+var request = URLRequest(url: url)
+request.httpMethod = method
+
+// Add additional request configurations if necessary (e.g., headers, body)
+
+let networkTask = NetworkRequestTask(
+    urlRequest: request,
+    priority: priority,
+    completions: { result, metrics in
+        switch result {
+        case .success(let data):
+            // Handle successful network response
+        case .failure(let error):
+            // Handle error scenario
+        }
+    }
+)
+SwiftFlow.shared.addTask(networkTask)
 ```
 
 ## Example: I/O Task
@@ -207,6 +227,7 @@ class FileIOTask: Task<Data> {
     }
 }
 ```
+
 # Detailed Example: Concurrent HTTP Requests
 There's a practical example using SwiftFlow to manage concurrent HTTP requests:
 ```swift
