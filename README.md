@@ -144,6 +144,8 @@ SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at
  - Concurrency Adjustment:
    - Increase concurrency if the success rate is high. Aka: allow more tasks to run at once.
    - Decrease concurrency if the success rate is low. Aka: decrease the amount of allowed tasks at once
+  
+Below is an example diagram of how the mechanism works, looking at the red line that indicates what percent of objects (represented as 0.0 to 1.0, where 1.0 is 100%, 0.8 is 80% etc), as the number of tasks that complete in the target time increases, then that means we can allow more tasks to execute concurrently without slowing down the application:
 ![Diagram](documentation/concurrencyprocess.png)
 
 ## License
