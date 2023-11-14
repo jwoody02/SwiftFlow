@@ -22,52 +22,69 @@ copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 
 # Usage
 ## Creating a Task
-To create a task, define the task execution block and initialize a `Task` object:
+To create a task in SwiftFlow, you define the task's execution logic and specify completion handlers:
 ```swift
-// define a task. Make note: You should define what kind of objects will be passed back into the completion callback
-// in this example, you'd replace {return_type} with a list of the actual types of objects you want to pass into the "then" block further down
-let task = Task<{return_type}>(identifier: {give the task a unique string identifier), priority: {priority}) { completion in
-    // Any code you put here will run whenever this task executes
-    // to indicate completion of the task, please use the Result object and call completion(.success()) or .error
-}
-
-// define what should happen after a task completes
-task.then { result, metrics in
-    // this will be called when the task is done, do what you want with the result of the code, or keep track of metrics to optimize in the future.
-    switch result {
-    case .success(let data):
-        // keep in mind data will be the return type defined when you made the task
-    case .failure(let error):
-        print("Error: \(error)")
+let task = TaskBuilder<String>()
+    .with(identifier: "uniqueTaskIdentifier")
+    .with(priority: .medium)
+    .with(executionBlock: { completion in
+        // Task execution logic
+        // Call completion(.success(data)) or completion(.failure(error)) when done
+    })
+    .then { result, metrics in
+        // First completion handler
+        // Handle the task result and metrics here
     }
-    // get information on how quickly the task executed
-    print("Execution Time: \(metrics.executionTime)")
-}
+    .then { result, metrics in
+        // Additional completion handlers can be chained
+    }
+    .build()
 ```
-
-PLEASE NOTE: simply creating a task will not add it to the task queue. All that we've done in the above example is define the code for a certain task, and what should be done upon its completion. To actually execute a task, use the `addTask` function as shown in the section below.
+Note: Simply creating a task does not automatically queue it for execution. This step only defines the task and its completion logic.
 
 ## Executing a Task
-Add your task to the TaskManager for execution:
+SwiftFlow provides three different ways to execute a task, each catering to different use cases:
+### 1. Executing a Task Through SwiftFlow's Task Manager
+This is the standard way to execute a task. It involves adding the task to SwiftFlow's task queue, where it's managed and executed based on its priority and the system's current load. This method is ideal for tasks that need to be managed and scheduled by SwiftFlow.
 ```swift
-SwiftFlow.shared.addTask(networkTask)
+// Example of adding a task to SwiftFlow's task manager
+let task = // ... [task creation code]
+SwiftFlow.shared.addTask(task)
 ```
-Tasks can be defined anywhere, all it takes is this one line to add the task to the queue and execute it again. Keep in mind, the task's `then` completion block will be called, you can update this completion block dynamically anywhere in your code as can be seen in the previous section `Creating a Task`.
+In this method, the task's completion handlers (defined via `.then`) are automatically called once the task is completed.
 
-## Multiple Listeners
-A cool aspect of SwiftFlow is you can add multiple listeners for a task given an id. For example, if you have multiple classes that need to be notified whenever a task of a certain id has executed, all you need to do is add a listener using `addListener`, here's an example:
+### 2. Direct Execution with Completion Handling
+If you need immediate execution of a task without adding it to SwiftFlow's queue, you can directly call the `execute()` method with a completion block. This method is useful when you want to run a task immediately and handle its completion in one place.
+```swift
+// Example of executing a task immediately with a completion block
+task.execute {
+    // This block is called after all of the task's completion handlers have been executed
+}
+```
+This method will execute all completion blocks added through the `.then` method, followed by the final completion block specified in `execute()`.
+
+### 3. Direct Execution without Completion Handling
+If you want to execute a task immediately and do not need any additional handling after the task's predefined completion logic, you can call the `execute()` method without any parameters. This is the simplest form of task execution, suitable when you just need to run a task and rely entirely on its predefined completion logic.
+```swift
+// Example of executing a task immediately without additional completion handling
+task.execute()
+```
+This method executes the task and its chained .then completion handlers, but does not provide an additional completion block.
+
+Each of these execution methods offers flexibility in how tasks are managed and executed, allowing SwiftFlow to be adaptable to different scenarios and requirements.
+
+## Adding listeners for Task Completion
+SwiftFlow allows you to add multiple listeners for a task, enabling different parts of your application to respond to the task's completion:
 ```swift
 SwiftFlow.shared.addListener(for: "your-task-id") { result in
     self.handleTaskResult(result)
 }
 ```
-Another way to think about listeners is as a way to have multiple `.then` listeners if multiple different things need to happen when a certain task completes.
+This feature is particularly useful for tasks that have wide-reaching effects or need to notify multiple components upon completion.
 
-# Detailed Example
-To give an example of how useful SwiftFlow is, lets use it to execute a large number of http requests concurrently. I'm going to define a simple class to help us make requests with the default shared URLSession and a completion callback:
+# Detailed Example: Concurrent HTTP Requests
+There's a practical example using SwiftFlow to manage concurrent HTTP requests:
 ```swift
-
-// Simple class to make requests and return the responses as a Result via a escaping completion
 class HTTPClient {
     static func makeRequest(to urlString: String, completion: @escaping (Result<String, Error>) -> Void) {
         guard let url = URL(string: urlString) else {
@@ -93,53 +110,42 @@ class HTTPClient {
     }
 }
 
-class ExampleClass() {
-    // 1. Define the HTTP request task
-    // This is an example of how you can create functions that help programmatically define tasks
-    // In this example, this function creates a http request task and can easily be used to create an infinite number of new HTTP tasks
+class ExampleClass {
     func createHTTPRequestTask(urlString: String, priority: TaskPriority) -> Task<Result<String, Error>> {
-        let task = Task<Result<String, Error>>(identifier: UUID().uuidString, priority: priority) { completion in
-            HTTPClient.makeRequest(to: urlString) { result in
-                completion(.success(result))
+        let task = TaskBuilder<Result<String, Error>>()
+            .with(identifier: UUID().uuidString)
+            .with(priority: priority)
+            .with(executionBlock: { completion in
+                HTTPClient.makeRequest(to: urlString) { result in
+                    completion(result)
+                }
+            })
+            .then { result, metrics in
+                switch result {
+                case .success(let response):
+                    print("Success: \(response)")
+                case .failure(let error):
+                    print("Error: \(error.localizedDescription)")
+                }
+                print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
             }
-        }
-    
-        // Handle the task completion
-        task.then { result, metrics in
-            switch result {
-            case .success(let response):
-                print("Success: \(response)")
-            case .failure(let error):
-                print("Error: \(error.localizedDescription)")
-            }
-            print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
-        }
-    
+            .build()
+
         return task
     }
 
-
     func executeExample() {
-        // Example usage of SwiftFlow with HTTP request tasks
-
-        // 2. Add tasks to SwiftFlow
-        let urls = [
-            "https://api.publicapis.org/entries",      // Public APIs list
-            "https://api.agify.io/?name=bella",        // Age prediction
-            // Add more as needed
-        ]
+        let urls = ["https://api.publicapis.org/entries", "https://api.agify.io/?name=bella"]
         urls.forEach { urlString in
-            // create a task for each url in the array and add the task to the queue
             let httpRequestTask = createHTTPRequestTask(urlString: urlString, priority: .medium)
             SwiftFlow.shared.addTask(httpRequestTask)
         }
-        
-        // Optional: Debug print the queue status
-        SwiftFlow.shared.debugPrintQueueStatus()
 
-}
+        SwiftFlow.shared.debugPrintQueueStatus()
+    }
 }
 ```
+In this example, `ExampleClass` demonstrates how to use SwiftFlow to handle multiple HTTP requests concurrently. Each request is encapsulated in a task with its own completion logic. The tasks are then queued and executed efficiently by SwiftFlow.
 
 # Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
