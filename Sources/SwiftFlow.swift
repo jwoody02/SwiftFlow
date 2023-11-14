@@ -50,14 +50,6 @@ struct TaskMetrics {
     var turnaroundTime: TimeInterval
 }
 
-/// Protocol defining essential properties of a task.
-protocol TaskProtocol {
-    var identifier: String { get }
-    var priority: TaskPriority { get set }
-    var creationTime: TimeInterval { get }
-    func executeInQueue(completion: @escaping () -> Void)
-}
-
 /// Builder for creating tasks with configurable properties.
 class TaskBuilder<ResultType> {
     private var identifier: String = UUID().uuidString
@@ -104,6 +96,7 @@ class Task<ResultType>: TaskProtocol {
     var executionBlock: (@escaping (TaskResult<ResultType>) -> Void) -> Void
     var completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]
     let executionQueue: DispatchQueue = .global()
+    var isCancelled: Bool = false
 
     /// Initializes a new task with specified properties.
     init(identifier: String, priority: TaskPriority, executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void, completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]) {
@@ -116,6 +109,11 @@ class Task<ResultType>: TaskProtocol {
     
     /// Executes the task as part of the managed queue
     func executeInQueue(completion: @escaping () -> Void = {}) {
+        guard !isCancelled else {
+            completion()
+            return
+        }
+        
         let startTime = ProcessInfo.processInfo.systemUptime
         let waitTime = startTime - creationTime
 
@@ -139,6 +137,7 @@ class Task<ResultType>: TaskProtocol {
     
     /// Executes the task directly.
     func execute(completion: @escaping () -> Void = {}) {
+        
         let startTime = ProcessInfo.processInfo.systemUptime
         let waitTime = startTime - creationTime
         self.executionBlock { result in
@@ -156,6 +155,10 @@ class Task<ResultType>: TaskProtocol {
         }
     }
     
+    func cancel() {
+        isCancelled = true
+    }
+
 }
 
 
@@ -169,11 +172,28 @@ protocol AnyTaskProtocol {
     func execute(completion: @escaping () -> Void)
 }
 
+/// Protocol defining essential properties of a task.
+protocol TaskProtocol {
+    var identifier: String { get }
+    var priority: TaskPriority { get set }
+    var creationTime: TimeInterval { get }
+    var isCancelled: Bool { get set }
+    func cancel()
+    func executeInQueue(completion: @escaping () -> Void)
+}
+
 class AnyTask: AnyTaskProtocol {
     private let _identifier: String
     private var _priority: TaskPriority
     private let _creationTime: TimeInterval
     private let _execute: (@escaping () -> Void) -> Void
+    private var _isCancelled: Bool = false
+    private let _cancel: () -> Void
+    
+    var isCancelled: Bool {
+        get { _isCancelled }
+        set { _isCancelled = newValue }
+    }
 
     var identifier: String { _identifier }
     var priority: TaskPriority {
@@ -188,11 +208,20 @@ class AnyTask: AnyTaskProtocol {
         _priority = task.priority
         _creationTime = task.creationTime
         _execute = task.executeInQueue
+        _cancel = task.cancel
     }
 
     /// Executes the wrapped task.
     func execute(completion: @escaping () -> Void) {
+        guard !isCancelled else {
+            completion()
+            return
+        }
         _execute(completion)
+    }
+    func cancel() {
+        _isCancelled = true
+        _cancel()
     }
 }
 
@@ -235,17 +264,14 @@ class SwiftFlow {
     private let performanceCheckInterval: TimeInterval = 10
     private var lastPerformanceCheck: TimeInterval = ProcessInfo.processInfo.systemUptime
     private var concurrencyAdjustmentHistory: [Int] = []
-    private var idealCompletionTime: TimeInterval = 2.0
+    private var idealCompletionTime: TimeInterval = 0.5
     private let successRateThreshold: Double = 0.80
     private var agingThreshold: TimeInterval = 10 // Age threshold for increasing priority
 
 
     /// Initializes the task manager with default settings.
     init() {
-        self.maxConcurrentTasks = UserDefaults.standard.integer(forKey: "maxConcurrentTasks")
-        if self.maxConcurrentTasks == 0 {
-            self.maxConcurrentTasks = ProcessInfo.processInfo.activeProcessorCount
-        }
+        self.maxConcurrentTasks = ProcessInfo.processInfo.activeProcessorCount
     }
 
     /// Adds a task to the queue and triggers its processing.
@@ -306,6 +332,22 @@ class SwiftFlow {
             }
         }
     }
+    
+    /// Cancels a task by its identifier.
+    /// Note: It does not cancel a task if it has already started (maybe a TODO)
+    func cancelTask(with identifier: String) {
+       taskQueueLock.async {
+           // Find the task in the queue
+           if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
+               self.taskQueue.elements[index].cancel()
+           }
+           // Also check in active tasks
+           if self.activeTasks.contains(identifier) {
+               // TODO: You can optionally notify the listener about cancellation here
+               self.activeTasks.remove(identifier)
+           }
+       }
+    }
 
     /// Notifies registered listeners about the completion of a task.
     private func notifyListeners(for identifier: String, with result: TaskResult<Any>) {
@@ -344,7 +386,6 @@ class SwiftFlow {
         }
 
         concurrencyAdjustmentHistory.append(maxConcurrentTasks)
-        UserDefaults.standard.set(maxConcurrentTasks, forKey: "maxConcurrentTasks")
     }
     
     /// Ages tasks that have been in the queue longer than the threshold and reorders them.
