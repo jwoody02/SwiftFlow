@@ -115,17 +115,25 @@ class ExampleClass {
         let task = TaskBuilder<Result<String, Error>>()
             .with(identifier: UUID().uuidString)
             .with(priority: priority)
-            .with(executionBlock: { completion in
+            .with(executionBlock: { taskCompletion in
                 HTTPClient.makeRequest(to: urlString) { result in
-                    completion(result)
+                    // Wrap the standard Result in a TaskResult
+                    let taskResult: TaskResult<Result<String, Error>> = .success(result)
+                    taskCompletion(taskResult)
                 }
             })
-            .then { result, metrics in
-                switch result {
-                case .success(let response):
-                    print("Success: \(response)")
+            .then { taskResult, metrics in
+                // Handle the task result and metrics
+                switch taskResult {
+                case .success(let result):
+                    switch result {
+                    case .success(let response):
+                        print("Success: \(response)")
+                    case .failure(let error):
+                        print("Error: \(error.localizedDescription)")
+                    }
                 case .failure(let error):
-                    print("Error: \(error.localizedDescription)")
+                    print("Task Error: \(error)")
                 }
                 print("Task Metrics: Wait Time: \(metrics.waitTime), Execution Time: \(metrics.executionTime)")
             }
