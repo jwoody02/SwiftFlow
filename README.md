@@ -81,6 +81,58 @@ SwiftFlow.shared.addListener(for: "your-task-id") { result in
 }
 ```
 This feature is particularly useful for tasks that have wide-reaching effects or need to notify multiple components upon completion.
+# Detailed Example: Image Downloading Task
+SwiftFlow allows tasks to be easily defined as a class, making for easy initialization and clean code, here's an example of a Task class for downloading images:
+```swift
+class ImageDownloadTask: Task<Data> {
+    let imageURL: URL
+
+    init(imageURL: URL, priority: TaskPriority, completions: @escaping (TaskResult<Data>, TaskMetrics) -> Void) {
+        self.imageURL = imageURL
+        super.init(
+            identifier: imageURL.absoluteString,
+            priority: priority,
+            executionBlock: { completion in
+                // Perform the actual download
+                URLSession.shared.dataTask(with: imageURL) { data, response, error in
+                    // Check for errors, invalid response, or no data
+                    if let error = error {
+                        completion(.failure(error))
+                        return
+                    }
+                    guard let httpResponse = response as? HTTPURLResponse, 200..<300 ~= httpResponse.statusCode else {
+                        completion(.failure(TaskError.noResult))
+                        return
+                    }
+                    guard let data = data else {
+                        completion(.failure(TaskError.noResult))
+                        return
+                    }
+                    // If everything is fine, return the downloaded data
+                    completion(.success(data))
+                }.resume()
+            },
+            completions: [completions]
+        )
+    }
+}
+```
+And here's how we can use the previous class to cleanly download an image using SwiftFlow's priority queue and pass the results back:
+```swift
+let imageDownloadTask = ImageDownloadTask(
+        imageURL: URL("https://example.com/test.png"),
+        priority: .medium,
+        completions: { result, metrics in
+            switch result {
+            case .success(let data):
+                // Handle successful image download, e.g., cache or display the image
+            case .failure(let error):
+                // Handle error scenario
+            }
+        }
+    )
+    SwiftFlow.shared.addTask(imageDownloadTask)
+```
 
 # Detailed Example: Concurrent HTTP Requests
 There's a practical example using SwiftFlow to manage concurrent HTTP requests:
