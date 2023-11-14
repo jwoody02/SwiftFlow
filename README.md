@@ -16,7 +16,7 @@ SwiftFlow is an advanced task management system for Swift, designed to handle co
 Clone the SwiftFlow repository:
 
 ```bash
-git clone https://github.com/yourusername/SwiftFlow.git
+git clone https://github.com/jwoody02/SwiftFlow.git
 ```
 copy `SwiftFlow.swift` from the Sources folder into your project. That's it!
 
