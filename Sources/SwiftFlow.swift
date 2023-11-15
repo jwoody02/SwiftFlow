@@ -38,6 +38,7 @@ enum TaskResult<ResultType> {
 enum TaskError: Error {
     case noResult
     case executionTimeout
+    case cancelled
 }
 
 /// Contains metrics about task execution.
@@ -147,12 +148,13 @@ class Task<ResultType>: TaskProtocol {
         // Handle timeout
         if let executionTimeout = configuration.executionTimeout {
             executionQueue.asyncAfter(deadline: .now() + executionTimeout) { [weak self] in
-                guard let self = self, !workItem.isCancelled else { return }
-                workItem.cancel()
+                guard let self = self, !(self.workItem?.isCancelled ?? false), !self.isCancelled else { return }
+                self.workItem?.cancel()
                 self.handleTimeout()
                 completion()
             }
         }
+
     }
     
     private func handleTimeout() {
@@ -182,6 +184,10 @@ class Task<ResultType>: TaskProtocol {
     func cancel() {
         isCancelled = true
         workItem?.cancel()
+        
+        completions.forEach { completion in
+            completion(.failure(TaskError.cancelled), TaskMetrics(waitTime: 0, executionTime: 0, turnaroundTime: 0))
+        }
     }
     
     /// Executes the task directly.
@@ -349,7 +355,9 @@ class SwiftFlow {
 
     /// Processes the next task in the queue if concurrency limits allow.
     private func processNextTask() {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+
             self.checkPerformanceAndAdjustConcurrency()
 
             if self.activeTaskCount >= self.maxConcurrentTasks {
@@ -365,10 +373,8 @@ class SwiftFlow {
             self.activeTasks.insert(task.identifier)
             self.activeTaskCount += 1
 
+            // Execute the task outside the lock to avoid deadlocks
             task.execute {
-                let endTime = ProcessInfo.processInfo.systemUptime
-                self.recordTaskPerformance(endTime - task.creationTime)
-
                 self.taskQueueLock.async {
                     self.activeTaskCount -= 1
                     self.activeTasks.remove(task.identifier)
@@ -378,6 +384,7 @@ class SwiftFlow {
             }
         }
     }
+
     
     /// Cancels a task by its identifier.
    func cancelTask(with identifier: String) {
@@ -386,6 +393,7 @@ class SwiftFlow {
            if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
                self.taskQueue.elements[index].cancel()
            }
+           
            // Cancel the task if it's active
            if self.activeTasks.contains(identifier) {
                // TODO: Implement logic to cancel an active task
@@ -451,16 +459,16 @@ class SwiftFlow {
     
     /// Prints the current state of the task queue for debugging purposes.
     func debugPrintQueueStatus() {
-        taskQueueLock.sync {
+        taskQueueLock.async {
             print("========SwiftFlow Debug========")
-            print("Current Max Concurrent Tasks: \(maxConcurrentTasks)")
+            print("Current Max Concurrent Tasks: \(self.maxConcurrentTasks)")
             print("Task Queue (In Order):")
             var i = 0
-            for task in taskQueue.elements {
+            for task in self.taskQueue.elements {
                 print("#\(i) - Task ID: \(task.identifier), Priority: \(task.priority)")
                 i += 1
             }
-            print("\nConcurrency Adjustment History: \(concurrencyAdjustmentHistory)")
+            print("\nConcurrency Adjustment History: \(self.concurrencyAdjustmentHistory)")
             print("===============================")
         }
     }
