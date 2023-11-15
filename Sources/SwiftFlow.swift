@@ -140,20 +140,20 @@ class Task<ResultType>: TaskProtocol {
                 self.handleCompletion(result: result, startTime: startTime, endTime: endTime, waitTime: waitTime)
                 completion()
             }
-        }
 
-        guard let workItem = workItem else { return }
-        executionQueue.async(execute: workItem)
-
-        // Handle timeout
-        if let executionTimeout = configuration.executionTimeout {
-            executionQueue.asyncAfter(deadline: .now() + executionTimeout) { [weak self] in
-                guard let self = self, !(self.workItem?.isCancelled ?? false), !self.isCancelled else { return }
-                self.workItem?.cancel()
-                self.handleTimeout()
-                completion()
+            if let executionTimeout = self.configuration.executionTimeout {
+                DispatchQueue.global().asyncAfter(deadline: .now() + executionTimeout) {
+                    self.workItem?.cancel()
+                    let errorResult: TaskResult<ResultType> = .failure(TaskError.executionTimeout)
+                    self.handleCompletion(result: errorResult, startTime: startTime, endTime: ProcessInfo.processInfo.systemUptime, waitTime: waitTime)
+                    completion()
+                }
             }
         }
+
+        // execute work item
+        guard let workItem = workItem else { return }
+        executionQueue.async(execute: workItem)
 
     }
     
@@ -182,13 +182,17 @@ class Task<ResultType>: TaskProtocol {
     }
 
     func cancel() {
-        isCancelled = true
-        workItem?.cancel()
-        
-        completions.forEach { completion in
-            completion(.failure(TaskError.cancelled), TaskMetrics(waitTime: 0, executionTime: 0, turnaroundTime: 0))
+        self.isCancelled = true
+        self.workItem?.cancel()
+
+        // Notify of cancellation
+        let metrics = TaskMetrics(waitTime: 0, executionTime: 0, turnaroundTime: 0)
+        self.completions.forEach { completion in
+            completion(.failure(TaskError.cancelled), metrics)
         }
+        
     }
+
     
     /// Executes the task directly.
     func execute(completion: @escaping () -> Void = {}) {
@@ -303,6 +307,30 @@ struct PriorityQueue<Element: AnyTaskProtocol> {
     }
 }
 
+/// enum for the different load levels that can be specified by user
+enum LoadLevel {
+    case low, medium, high
+}
+
+/// customizable configuration for max CPU load level, memory level, setting the max concurrent tasks, and using dynamic scheduling
+struct SwiftFlowConfiguration {
+    var cpuLoadLevel: LoadLevel = .medium
+    var memoryLoadLevel: LoadLevel = .medium
+    var manualMaxConcurrentTasks: Int? = nil
+    var useDynamicTaskScheduling: Bool = true
+
+    func loadFactor(for level: LoadLevel) -> Double {
+        switch level {
+        case .low:
+            return 0.3 // 30%
+        case .medium:
+            return 0.5 // 50%
+        case .high:
+            return 0.7 // 70%
+        }
+    }
+}
+
 /// The core task manager that handles task execution, priority, and concurrency.
 class SwiftFlow {
     static let shared = SwiftFlow()
@@ -315,10 +343,10 @@ class SwiftFlow {
     private var maxConcurrentTasks: Int
     private let performanceCheckInterval: TimeInterval = 10
     private var lastPerformanceCheck: TimeInterval = ProcessInfo.processInfo.systemUptime
-    private var concurrencyAdjustmentHistory: [Int] = []
-    private var idealCompletionTime: TimeInterval = 0.5
-    private let successRateThreshold: Double = 0.80
     private var agingThreshold: TimeInterval = 10 // Age threshold for increasing priority
+    
+    var configuration = SwiftFlowConfiguration()
+    private var systemLoadManager = SystemLoadManager()
 
 
     /// Initializes the task manager with default settings.
@@ -363,29 +391,27 @@ class SwiftFlow {
             if self.activeTaskCount >= self.maxConcurrentTasks {
                 return
             }
+                
+            // find next task to execute, making sure to block duplicate tasks
+            while let task = self.taskQueue.dequeue() {
+                if !self.activeTasks.contains(task.identifier) {
+                    self.activeTasks.insert(task.identifier)
+                    self.activeTaskCount += 1
 
-            guard let task = self.taskQueue.dequeue() else { return }
-            guard !self.activeTasks.contains(task.identifier) else {
-                self.taskQueue.enqueue(task)
-                return
-            }
-
-            self.activeTasks.insert(task.identifier)
-            self.activeTaskCount += 1
-
-            // Execute the task outside the lock to avoid deadlocks
-            task.execute {
-                self.taskQueueLock.async {
-                    self.activeTaskCount -= 1
-                    self.activeTasks.remove(task.identifier)
-                    self.notifyListeners(for: task.identifier, with: .success(()))
-                    self.processNextTask()
+                    task.execute {
+                        self.taskQueueLock.async {
+                            self.activeTaskCount -= 1
+                            self.activeTasks.remove(task.identifier)
+                            self.notifyListeners(for: task.identifier, with: .success(()))
+                            self.processNextTask()
+                        }
+                    }
+                    break
                 }
             }
         }
     }
 
-    
     /// Cancels a task by its identifier.
    func cancelTask(with identifier: String) {
        taskQueueLock.async {
@@ -404,10 +430,13 @@ class SwiftFlow {
 
     /// Notifies registered listeners about the completion of a task.
     private func notifyListeners(for identifier: String, with result: TaskResult<Any>) {
-        listeners[identifier]?.forEach { listener in
-            listener(result)
+        taskQueueLock.async {
+            self.listeners[identifier]?.forEach { listener in
+                listener(result)
+            }
         }
     }
+
 
     /// Records the performance of a task to inform future concurrency adjustments.
     private func recordTaskPerformance(_ turnaroundTime: TimeInterval) {
@@ -422,23 +451,38 @@ class SwiftFlow {
             adjustConcurrencyBasedOnPerformance()
         }
     }
-
+    
+    
+    /// Updates the configuration (called by user)
+    func updateConfiguration(_ newConfiguration: SwiftFlowConfiguration) {
+        taskQueueLock.async {
+            self.configuration = newConfiguration
+        }
+    }
+    
     /// Adjusts concurrency settings based on recent task performance.
     private func adjustConcurrencyBasedOnPerformance() {
-        guard !taskPerformanceRecords.isEmpty else { return }
-
-        let successRate = taskPerformanceRecords.filter { $0 <= idealCompletionTime }.count / taskPerformanceRecords.count
-        taskPerformanceRecords.removeAll()
-
-        if Double(successRate) > successRateThreshold {
-            idealCompletionTime = min(idealCompletionTime + 0.1, 5)
-            maxConcurrentTasks = min(ProcessInfo.processInfo.activeProcessorCount, maxConcurrentTasks + 1)
-        } else {
-            idealCompletionTime = max(idealCompletionTime - 0.1, 1)
-            maxConcurrentTasks = max(1, maxConcurrentTasks - 1)
+        /// If user has disabled dynamic task scheduling, exit
+        guard configuration.useDynamicTaskScheduling else {
+            self.maxConcurrentTasks = configuration.manualMaxConcurrentTasks ?? ProcessInfo.processInfo.activeProcessorCount
+            return
         }
+        
+        /// check current cpu and memory load, adjust the maximum concurrent tasks accordingly
+        let currentCpuLoad = systemLoadManager.getCurrentCpuLoad()
+        let currentMemoryLoad = systemLoadManager.getCurrentMemoryLoad()
+        let cpuLoadFactor = configuration.loadFactor(for: configuration.cpuLoadLevel)
+        let memoryLoadFactor = configuration.loadFactor(for: configuration.memoryLoadLevel)
 
-        concurrencyAdjustmentHistory.append(maxConcurrentTasks)
+        taskQueueLock.async {
+            if currentCpuLoad < cpuLoadFactor && currentMemoryLoad < memoryLoadFactor {
+                /// increase allowed concurrent tasks, with a hard limit of active processor count to avoid thread explosions
+                self.maxConcurrentTasks = min(ProcessInfo.processInfo.activeProcessorCount, self.maxConcurrentTasks + 1)
+            } else {
+                /// we've exceeded our threshold, reduce number of concurrent tasks
+                self.maxConcurrentTasks = max(1, self.maxConcurrentTasks - 1)
+            }
+        }
     }
     
     /// Ages tasks that have been in the queue longer than the threshold and reorders them.
@@ -468,8 +512,50 @@ class SwiftFlow {
                 print("#\(i) - Task ID: \(task.identifier), Priority: \(task.priority)")
                 i += 1
             }
-            print("\nConcurrency Adjustment History: \(self.concurrencyAdjustmentHistory)")
             print("===============================")
         }
+    }
+}
+
+/// Provides useful information about current CPU and Memory load
+class SystemLoadManager {
+    /// Returns value from 0.0 to 1.0 (0 to 100%)  that represents the relative CPU load
+    func getCurrentCpuLoad() -> Double {
+        var load: Double = 0.0
+        var numCpuU = natural_t(0)
+        var cpuInfo: processor_info_array_t?
+        var numCpuInfo = mach_msg_type_number_t(0)
+
+        let result = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &numCpuU, &cpuInfo, &numCpuInfo)
+        if result == KERN_SUCCESS, let cpuInfo = cpuInfo {
+            for i in 0 ..< Int(numCpuU) {
+                let offset = Int(CPU_STATE_MAX) * i
+                let inUse = cpuInfo[offset + Int(CPU_STATE_USER)] + cpuInfo[offset + Int(CPU_STATE_SYSTEM)] + cpuInfo[offset + Int(CPU_STATE_NICE)]
+                let total = inUse + cpuInfo[offset + Int(CPU_STATE_IDLE)]
+                load += (Double(inUse) / Double(total))
+            }
+            load /= Double(numCpuU)
+            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: cpuInfo), vm_size_t(numCpuInfo) * vm_size_t(MemoryLayout<Int32>.stride))
+        }
+        return load
+    }
+    
+    /// Returns value from 0.0 to 1.0 (0 to 100%) that represents the relative Memory load
+    func getCurrentMemoryLoad() -> Double {
+        var load: Double = 0.0
+        var vmStats = vm_statistics64()
+        var infoCount = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+
+        let result = withUnsafeMutablePointer(to: &vmStats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &infoCount)
+            }
+        }
+        if result == KERN_SUCCESS {
+            let totalUsedMemory = vmStats.active_count + vmStats.inactive_count + vmStats.wire_count
+            let totalMemory = vmStats.active_count + vmStats.inactive_count + vmStats.free_count + vmStats.wire_count
+            load = Double(totalUsedMemory) / Double(totalMemory)
+        }
+        return load
     }
 }
