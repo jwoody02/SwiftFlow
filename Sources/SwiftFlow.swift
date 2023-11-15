@@ -339,7 +339,6 @@ class SwiftFlow {
     private var listeners = [String: [(TaskResult<Any>) -> Void]]()
     private var taskPerformanceRecords = [TimeInterval]()
     private let taskQueueLock = DispatchQueue(label: "com.swiftflow.lock")
-    private var activeTaskCount = 0
     private var maxConcurrentTasks: Int
     private let performanceCheckInterval: TimeInterval = 10
     private var lastPerformanceCheck: TimeInterval = ProcessInfo.processInfo.systemUptime
@@ -347,11 +346,16 @@ class SwiftFlow {
     
     var configuration = SwiftFlowConfiguration()
     private var systemLoadManager = SystemLoadManager()
+    var enablePrintDebug: Bool = true
 
 
     /// Initializes the task manager with default settings.
     init() {
         self.maxConcurrentTasks = ProcessInfo.processInfo.activeProcessorCount
+    }
+    
+    public func setPrintDebug(to: Bool) {
+        self.enablePrintDebug = to
     }
 
     /// Adds a task to the queue and triggers its processing.
@@ -359,7 +363,9 @@ class SwiftFlow {
         taskQueueLock.async {
             self.ageAndReorderTasks()
             let anyTask = AnyTask(task)
-            self.taskQueue.enqueue(anyTask)
+            if !self.activeTasks.contains(task.identifier) {
+                self.taskQueue.enqueue(anyTask)
+            }
             self.processNextTask()
         }
     }
@@ -388,32 +394,42 @@ class SwiftFlow {
 
             self.checkPerformanceAndAdjustConcurrency()
 
-            if self.activeTaskCount >= self.maxConcurrentTasks {
-                return
-            }
-                
-            // find next task to execute, making sure to block duplicate tasks
-            while let task = self.taskQueue.dequeue() {
-                if !self.activeTasks.contains(task.identifier) {
+            while self.activeTasks.count < self.maxConcurrentTasks {
+                if let task = self.taskQueue.dequeue() {
                     self.activeTasks.insert(task.identifier)
-                    self.activeTaskCount += 1
+
+                    if self.enablePrintDebug {
+                        self.printDebugInfo("Executing Task \(task.identifier)")
+                    }
 
                     task.execute {
                         self.taskQueueLock.async {
-                            self.activeTaskCount -= 1
+                            if self.enablePrintDebug {
+                                self.printDebugInfo("Completed Task \(task.identifier)")
+                            }
                             self.activeTasks.remove(task.identifier)
                             self.notifyListeners(for: task.identifier, with: .success(()))
+
+                            // Trigger processing of the next task if possible
                             self.processNextTask()
                         }
                     }
+                } else {
+                    // No more tasks to process
                     break
                 }
             }
         }
     }
 
+
+
     /// Cancels a task by its identifier.
    func cancelTask(with identifier: String) {
+       /// Debug print
+       if enablePrintDebug {
+           printDebugInfo("Cancelling Task: \(identifier)")
+       }
        taskQueueLock.async {
            // Cancel the task in the queue
            if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
@@ -427,7 +443,33 @@ class SwiftFlow {
            }
        }
    }
+    /// Prints debug information including CPU and Memory utilization.
+    private func printDebugInfo(_ message: String) {
+        let cpuLoad = systemLoadManager.getCurrentCpuLoad()
+        let memoryLoad = systemLoadManager.getCurrentMemoryLoad()
 
+        let formattedCpuLoad = String(format: "%.2f%%", cpuLoad * 100)
+        let formattedMemoryLoad = String(format: "%.2f%%", memoryLoad * 100)
+        let taskInfo = "\(activeTasks.count)/\(maxConcurrentTasks)"
+
+        let labelWidth = 25
+        let valueWidth = 10
+
+        let header = "SwiftFlow Debug Output:"
+        let messageLine = "Message:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + message
+        let cpuLoadLine = "CPU Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedCpuLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+        let memoryLoadLine = "Memory Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedMemoryLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+        let taskInfoLine = "Active Tasks:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + taskInfo.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+        let queueSizeLine = "Tasks in Queue:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + "\(taskQueue.elements.count)".padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+        let footer = String(repeating: "-", count: header.count)
+
+        let debugInfo = [header, messageLine, cpuLoadLine, memoryLoadLine, taskInfoLine, queueSizeLine, footer].joined(separator: "\n")
+
+        print(debugInfo)
+    }
+
+
+    
     /// Notifies registered listeners about the completion of a task.
     private func notifyListeners(for identifier: String, with result: TaskResult<Any>) {
         taskQueueLock.async {
@@ -475,12 +517,16 @@ class SwiftFlow {
         let memoryLoadFactor = configuration.loadFactor(for: configuration.memoryLoadLevel)
 
         taskQueueLock.async {
+            let oldConcurrentTasks = self.maxConcurrentTasks
             if currentCpuLoad < cpuLoadFactor && currentMemoryLoad < memoryLoadFactor {
                 /// increase allowed concurrent tasks, with a hard limit of active processor count to avoid thread explosions
                 self.maxConcurrentTasks = min(ProcessInfo.processInfo.activeProcessorCount, self.maxConcurrentTasks + 1)
             } else {
                 /// we've exceeded our threshold, reduce number of concurrent tasks
                 self.maxConcurrentTasks = max(1, self.maxConcurrentTasks - 1)
+            }
+            if self.enablePrintDebug {
+                self.printDebugInfo("Setting max concurrent tasks from \(oldConcurrentTasks) to \(self.maxConcurrentTasks).")
             }
         }
     }
