@@ -378,9 +378,9 @@ SwiftFlow features an advanced adaptive concurrency mechanism that dynamically a
 ## Diagrammatic Representation
 Below is a diagram illustrating SwiftFlow's adaptive concurrency mechanism over time:
 
- - "Concurrency Level": A numeric value representing the number of tasks that can execute simultaneously.
- - "Success Rate": A percentage (0% to 100%) indicating the proportion of tasks that completed within the ideal completion time.
- - "Ideal Completion Time": The dynamically adjusted target time for task completion.
+ - "System Load": A value ranging from 0.0 to 1.0 (0% to 100%) that represents the systems current load. 
+ - "Load Threshold": A value ranging from 0.0 to 1.0 (0% to 100%) indicating the target system load SwiftFlow tries to keep under.
+ - "Max Concurrent Tasks": A value ranging from 1 to the number of active CPUs and is the maximum allowed tasks that can run concurrently.
 
 The diagram shows how the concurrency level is adjusted based on the balance between maintaining a high success rate and keeping system load within user-defined limits. As tasks consistently complete within the ideal time frame without overloading the system, SwiftFlow gradually allows more tasks to run concurrently, enhancing overall efficiency.
 
