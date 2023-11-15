@@ -271,7 +271,7 @@ class ExampleClass {
 ```
 In this example, `ExampleClass` demonstrates how to use SwiftFlow to handle multiple HTTP requests concurrently. Each request is encapsulated in a task with its own completion logic. The tasks are then queued and executed efficiently by SwiftFlow.
 
-## Detailed Example: Self-Starting Image Downloading with Caching Task
+## Detailed Example: Self-Starting Image Downloading Task
 ```swift
 // Image download task that returns a UIImage and handles automatic caching
 class ImageDownloadTask: Task<UIImage> {
@@ -279,6 +279,9 @@ class ImageDownloadTask: Task<UIImage> {
     
     init(imageURL: URL, priority: TaskPriority, autoEnqueue: Bool = true, completion: @escaping (TaskResult<UIImage>, TaskMetrics) -> Void) {
         self.imageURL = imageURL
+        
+        // Custom configuration that limits execution time to 5 seconds, retries a max of 2 times
+        let taskConfig = TaskConfiguration(maxRetries: 2, executionTimeout: 5.0)
         super.init(
             identifier: "image-download-\(imageURL.absoluteString)",
             priority: priority,
@@ -308,7 +311,8 @@ class ImageDownloadTask: Task<UIImage> {
                     }.resume()
                 }
             },
-            completions: [completion]
+            completions: [completion],
+            configuration: taskConfig // make sure to set custom config
         )
         
         if autoEnqueue {
@@ -333,7 +337,7 @@ ImageDownloadTask(
     }
 )
 ```
-I don't recommend using this exact code in a production application, as its only a basic downloading and caching mechanism, however, in conjunction with `KingFisher` or some other framework more akin to efficiently downloading images, it would work well.
+I don't recommend using this exact code in a production application, as it's only a basic downloading and caching mechanism, however, in conjunction with `KingFisher` or some other framework more akin to efficiently downloading images, it would work well.
 
 # Concurrency Adjustment Mechanism
 SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
