@@ -87,6 +87,16 @@ class TaskBuilder<ResultType> {
     }
 }
 
+/// Configuration for task retry and timeout.
+struct TaskConfiguration {
+    var maxRetries: Int = 3
+    var executionTimeout: TimeInterval?
+
+    init(maxRetries: Int = 3, executionTimeout: TimeInterval? = nil) {
+        self.maxRetries = maxRetries
+        self.executionTimeout = executionTimeout
+    }
+}
 
 /// Represents a unified task conforming to the TaskProtocol.
 class Task<ResultType>: TaskProtocol {
@@ -97,14 +107,18 @@ class Task<ResultType>: TaskProtocol {
     var completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]
     let executionQueue: DispatchQueue = .global()
     var isCancelled: Bool = false
+    private var workItem: DispatchWorkItem?
+    private var retryCount: Int = 0
+    var configuration: TaskConfiguration
 
     /// Initializes a new task with specified properties.
-    init(identifier: String, priority: TaskPriority, executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void, completions: [(TaskResult<ResultType>, TaskMetrics) -> Void]) {
+    init(identifier: String, priority: TaskPriority, executionBlock: @escaping (@escaping (TaskResult<ResultType>) -> Void) -> Void, completions: [(TaskResult<ResultType>, TaskMetrics) -> Void], configuration: TaskConfiguration = TaskConfiguration()) {
         self.identifier = identifier
         self.priority = priority
         self.executionBlock = executionBlock
         self.completions = completions
         self.creationTime = ProcessInfo.processInfo.systemUptime
+        self.configuration = configuration
     }
     
     /// Executes the task as part of the managed queue
@@ -113,26 +127,61 @@ class Task<ResultType>: TaskProtocol {
             completion()
             return
         }
-        
+
         let startTime = ProcessInfo.processInfo.systemUptime
         let waitTime = startTime - creationTime
 
-        executionQueue.async { [weak self] in
+        workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
+
             self.executionBlock { result in
                 let endTime = ProcessInfo.processInfo.systemUptime
-                let executionTime = endTime - startTime
-                let turnaroundTime = endTime - self.creationTime
-                let metrics = TaskMetrics(waitTime: waitTime, executionTime: executionTime, turnaroundTime: turnaroundTime)
-                
-                DispatchQueue.main.async {
-                    self.completions.forEach { completion in
-                        completion(result, metrics)
-                    }
-                    completion()
-                }
+                self.handleCompletion(result: result, startTime: startTime, endTime: endTime, waitTime: waitTime)
+                completion()
             }
         }
+
+        guard let workItem = workItem else { return }
+        executionQueue.async(execute: workItem)
+
+        // Handle timeout
+        if let executionTimeout = configuration.executionTimeout {
+            executionQueue.asyncAfter(deadline: .now() + executionTimeout) { [weak self] in
+                guard let self = self, !workItem.isCancelled else { return }
+                workItem.cancel()
+                self.handleTimeout()
+                completion()
+            }
+        }
+    }
+    
+    private func handleTimeout() {
+        if retryCount < configuration.maxRetries {
+            retryCount += 1
+            executeInQueue()
+        } else {
+            let metrics = TaskMetrics(waitTime: 0, executionTime: configuration.executionTimeout ?? 0, turnaroundTime: configuration.executionTimeout ?? 0)
+            completions.forEach { completion in
+                completion(.failure(TaskError.executionTimeout), metrics)
+            }
+        }
+    }
+
+    private func handleCompletion(result: TaskResult<ResultType>, startTime: TimeInterval, endTime: TimeInterval, waitTime: TimeInterval) {
+        let executionTime = endTime - startTime
+        let turnaroundTime = endTime - self.creationTime
+        let metrics = TaskMetrics(waitTime: waitTime, executionTime: executionTime, turnaroundTime: turnaroundTime)
+
+        DispatchQueue.main.async {
+            self.completions.forEach { completion in
+                completion(result, metrics)
+            }
+        }
+    }
+
+    func cancel() {
+        isCancelled = true
+        workItem?.cancel()
     }
     
     /// Executes the task directly.
@@ -155,9 +204,6 @@ class Task<ResultType>: TaskProtocol {
         }
     }
     
-    func cancel() {
-        isCancelled = true
-    }
 
 }
 
@@ -334,20 +380,19 @@ class SwiftFlow {
     }
     
     /// Cancels a task by its identifier.
-    /// Note: It does not cancel a task if it has already started (maybe a TODO)
-    func cancelTask(with identifier: String) {
+   func cancelTask(with identifier: String) {
        taskQueueLock.async {
-           // Find the task in the queue
+           // Cancel the task in the queue
            if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
                self.taskQueue.elements[index].cancel()
            }
-           // Also check in active tasks
+           // Cancel the task if it's active
            if self.activeTasks.contains(identifier) {
-               // TODO: You can optionally notify the listener about cancellation here
+               // TODO: Implement logic to cancel an active task
                self.activeTasks.remove(identifier)
            }
        }
-    }
+   }
 
     /// Notifies registered listeners about the completion of a task.
     private func notifyListeners(for identifier: String, with result: TaskResult<Any>) {
