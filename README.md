@@ -2,7 +2,7 @@
 
 ![SwiftFlow Logo](documentation/swiftflowLogo.png)
 
-SwiftFlow is an advanced task management system for Swift, designed to handle concurrent tasks with dynamic performance adjustment efficiently. It uses an adaptive algorithm to optimize task execution based on system load and task performance, ensuring smooth and efficient task handling.
+SwiftFlow is a cutting-edge task management system for Swift, adept at handling concurrent tasks with dynamic performance tuning. It employs an adaptive algorithm to optimize task execution based on individualized system load parameters and performance metrics, ensuring efficient and responsive task management.
 
 ## Key Features
 
@@ -10,17 +10,19 @@ SwiftFlow is an advanced task management system for Swift, designed to handle co
 
 🌐 **Seamless Integration with Swift Projects**: Designed specifically for Swift, SwiftFlow integrates smoothly into any Swift-based application.
 
-📈 **Adaptive Performance Optimization**: Dynamically adjusts task execution based on system performance, ensuring optimal efficiency.
+📈 **Adaptive Performance Optimization**: Dynamically adjusts task execution based on customized system load settings and performance metrics, ensuring peak efficiency.
 
 ### Technical Features
 
 | Feature | Description |
 | ------- | ----------- |
-| 🔄 **Dynamic Concurrency Adjustment** | Automatically adjusts the number of concurrent tasks based on real-time performance metrics. |
-| ⏳ **Task Prioritization with Aging** | Manages tasks based on urgency and increases priority over time to ensure timely execution. |
-| 🔧 **Customizable Execution Blocks** | Offers flexibility to define custom task execution logic. |
-| 📊 **Performance Metrics Tracking** | Provides detailed insights into task performance, including execution times and efficiency. |
-| 🔄 **Retry Logic and Timeout Handling** | Includes robust mechanisms for task retries and handling timeouts, enhancing reliability. |
+| 🔄 **Dynamic Concurrency Adjustment** | Automatically adjusts the number of concurrent tasks based on real-time system load and performance metrics. |
+| ⏳ **Task Prioritization with Aging** | Manages tasks based on urgency and increases priority over time to ensure prompt execution. |
+| 🔧 **Customizable Execution Blocks** | Provides the flexibility to define custom task execution logic. |
+| 📊 **Performance Metrics Tracking** | Offers detailed insights into task performance, including execution times and system load impacts. |
+| 🔄 **Retry Logic and Timeout Handling** | Features robust mechanisms for task retries and timeout management, enhancing reliability. |
+| ⚙️  **User-Defined System Load Limits**| Allows users to specify CPU and memory load thresholds for tailored task management. |
+| 🎛️ **Manual Control** | Enables manual setting of maximum concurrent tasks, offering direct control over task execution concurrency. |
 
 
 ## How SwiftFlow Works
@@ -360,29 +362,31 @@ ImageDownloadTask(
 ```
 I don't recommend using this exact code in a production application, as it's only a basic downloading and caching mechanism, however, in conjunction with `KingFisher` or some other framework more akin to efficiently downloading images, it would work well.
 
-# Concurrency Adjustment Mechanism
-SwiftFlow adjusts the concurrency level (aka the number of tasks that can run at once) based on the performance of tasks. The system calculates an ideal completion time for tasks and adjusts it based on the success rate of task completion.
+# How SwiftFlow's Adaptive Concurrency Works
+SwiftFlow features an advanced adaptive concurrency mechanism that dynamically adjusts the number of concurrent tasks based on system load and task performance metrics. This approach ensures optimal utilization of system resources while maintaining responsive performance.
 
-## How It Works
- - Initial Ideal Time: Set to a default value (e.g., 2 seconds).
- - Success Rate Calculation: The percentage of tasks completing within the ideal time is calculated.
- - Adjusting Ideal Time:
-   - The ideal time is increased if the success rate is above a threshold (e.g., 80%).
-   - If the success rate is below the threshold, the ideal time is decreased.
- - Concurrency Adjustment:
-   - Increase concurrency if the success rate is high. Aka: allow more tasks to run at once.
-   - Decrease concurrency if the success rate is low. Aka: decrease the amount of allowed tasks at once
-  
-Below is an example diagram of how the mechanism works over time, as the number of tasks that complete in the target time increases, then that means we can allow more tasks to execute concurrently without slowing down the application:
- - Note:
-     - "Concurrency Level" is a numerical representation for the number of tasks that are allowed to execute at the same time
-     - "Success Rate" is a numerical representation between 0.0 and 1.0 (0% to 100%) and represents the amount of tasks that completed in the "ideal" execution time
-     - "Ideal Completion Time" is the target time that SwiftFlow dynamically sets for which all tasks should try to complete by.
- - Over time, if tasks complete quick enough, the amount of tasks allowed at the same time will increase, and vice versa
- - In layman's terms: SwiftFlow will execute as many tasks concurrently as possible while still ensuring that latency is kept at a minimal level
-    
+## System Load Monitoring
+ - **CPU and Memory Load Levels**: SwiftFlow monitors CPU and memory usage, allowing users to define threshold levels (low, medium, high) for each.
+ - **Dynamic Load Assessment**: The system continually assesses the current CPU and memory loads against these user-defined thresholds.
+   
+## Adaptive Concurrency Adjustment
+ - **Dynamic Adjustment Based on Load and Performance**:
+      - When both CPU and memory loads are below their respective thresholds and the task success rate is high, SwiftFlow increases concurrency to maximize throughput.
+      - If either CPU or memory load exceeds its threshold, or if the task success rate falls below a set threshold (e.g., 80%), SwiftFlow reduces concurrency to alleviate system strain.
+ - **Manual Concurrency Control**: Users can manually set a maximum number of concurrent tasks, overriding the adaptive mechanism.
+
+## Diagrammatic Representation
+Below is a diagram illustrating SwiftFlow's adaptive concurrency mechanism over time:
+
+ - "Concurrency Level": A numeric value representing the number of tasks that can execute simultaneously.
+ - "Success Rate": A percentage (0% to 100%) indicating the proportion of tasks that completed within the ideal completion time.
+ - "Ideal Completion Time": The dynamically adjusted target time for task completion.
+
+The diagram shows how the concurrency level is adjusted based on the balance between maintaining a high success rate and keeping system load within user-defined limits. As tasks consistently complete within the ideal time frame without overloading the system, SwiftFlow gradually allows more tasks to run concurrently, enhancing overall efficiency.
+
 ![Diagram](documentation/concurrencyprocess.png)
 
+In essence, SwiftFlow intelligently balances task throughput with system performance, ensuring that tasks are executed as efficiently as possible while maintaining minimal latency and respecting system load constraints.
 ## License
 SwiftFlow is released under the MIT License. Feel free to use it for whatever you want!
 
