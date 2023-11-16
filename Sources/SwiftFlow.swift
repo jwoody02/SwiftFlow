@@ -135,34 +135,35 @@ class Task<ResultType>: TaskProtocol {
         workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
 
+            let timeoutWorkItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.handleTimeout(startTime: startTime, waitTime: waitTime)
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + (self.configuration.executionTimeout ?? 0), execute: timeoutWorkItem)
+
             self.executionBlock { result in
+                timeoutWorkItem.cancel() // Cancel the timeout work item as the task has completed
                 let endTime = ProcessInfo.processInfo.systemUptime
                 self.handleCompletion(result: result, startTime: startTime, endTime: endTime, waitTime: waitTime)
                 completion()
-            }
-
-            if let executionTimeout = self.configuration.executionTimeout {
-                DispatchQueue.global().asyncAfter(deadline: .now() + executionTimeout) {
-                    self.workItem?.cancel()
-                    let errorResult: TaskResult<ResultType> = .failure(TaskError.executionTimeout)
-                    self.handleCompletion(result: errorResult, startTime: startTime, endTime: ProcessInfo.processInfo.systemUptime, waitTime: waitTime)
-                    completion()
-                }
             }
         }
 
         // execute work item
         guard let workItem = workItem else { return }
         executionQueue.async(execute: workItem)
-
     }
     
-    private func handleTimeout() {
+    private func handleTimeout(startTime: TimeInterval, waitTime: TimeInterval) {
         if retryCount < configuration.maxRetries {
             retryCount += 1
             executeInQueue()
         } else {
-            let metrics = TaskMetrics(waitTime: 0, executionTime: configuration.executionTimeout ?? 0, turnaroundTime: configuration.executionTimeout ?? 0)
+            let endTime = ProcessInfo.processInfo.systemUptime
+            let executionTime = endTime - startTime
+            let turnaroundTime = endTime - self.creationTime
+            let metrics = TaskMetrics(waitTime: waitTime, executionTime: executionTime, turnaroundTime: turnaroundTime)
             completions.forEach { completion in
                 completion(.failure(TaskError.executionTimeout), metrics)
             }
@@ -181,16 +182,9 @@ class Task<ResultType>: TaskProtocol {
         }
     }
 
+    /// Cancels the task.
     func cancel() {
-        self.isCancelled = true
-        self.workItem?.cancel()
-
-        // Notify of cancellation
-        let metrics = TaskMetrics(waitTime: 0, executionTime: 0, turnaroundTime: 0)
-        self.completions.forEach { completion in
-            completion(.failure(TaskError.cancelled), metrics)
-        }
-        
+        SwiftFlow.shared.cancelTask(with: identifier)
     }
 
     
@@ -342,12 +336,16 @@ class SwiftFlow {
     private var maxConcurrentTasks: Int
     private let performanceCheckInterval: TimeInterval = 10
     private var lastPerformanceCheck: TimeInterval = ProcessInfo.processInfo.systemUptime
-    private var agingThreshold: TimeInterval = 10 // Age threshold for increasing priority
+    private var agingThreshold: TimeInterval = 10
+    private var lastAgingTime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private let agingInterval: TimeInterval = 10
+    private var taskWorkItems: [String: DispatchWorkItem] = [:]
+    private let executionQueue: DispatchQueue = .global()
     
     var configuration = SwiftFlowConfiguration()
     private var systemLoadManager = SystemLoadManager()
     var enablePrintDebug: Bool = true
-
+    
 
     /// Initializes the task manager with default settings.
     init() {
@@ -360,26 +358,49 @@ class SwiftFlow {
 
     /// Adds a task to the queue and triggers its processing.
     func addTask<ResultType>(_ task: Task<ResultType>) {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+            
             self.ageAndReorderTasks()
             let anyTask = AnyTask(task)
             if !self.activeTasks.contains(task.identifier) {
                 self.taskQueue.enqueue(anyTask)
             }
-            self.processNextTask()
+            self.prepareAndExecute(task: anyTask)
         }
     }
 
+    /// Process and execute a task.
+    private func prepareAndExecute(task: AnyTask) {
+        let workItem = DispatchWorkItem { [weak self, task] in
+            guard let self = self else { return }
+            
+            task.execute {
+                self.taskQueueLock.async {
+                    self.activeTasks.remove(task.identifier)
+                    self.taskWorkItems.removeValue(forKey: task.identifier)
+                    self.processNextTask()
+                }
+            }
+        }
+        taskWorkItems[task.identifier] = workItem
+        executionQueue.async(execute: workItem)
+    }
+    
     /// Updates the priority of a task and reorders the queue accordingly.
     func updatePriority<ResultType: TaskProtocol>(of task: ResultType, to newPriority: TaskPriority) {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+            
             self.taskQueue.updatePriority(for: task.identifier, to: newPriority)
         }
     }
 
     /// Registers a listener for task completion events.
     func addListener(for identifier: String, listener: @escaping (TaskResult<Any>) -> Void) {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+            
             if self.listeners[identifier] == nil {
                 self.listeners[identifier] = []
             }
@@ -391,88 +412,87 @@ class SwiftFlow {
     private func processNextTask() {
         taskQueueLock.async { [weak self] in
             guard let self = self else { return }
-
-            self.checkPerformanceAndAdjustConcurrency()
-
-            while self.activeTasks.count < self.maxConcurrentTasks {
-                if let task = self.taskQueue.dequeue() {
-                    self.activeTasks.insert(task.identifier)
-
-                    if self.enablePrintDebug {
-                        self.printDebugInfo("Executing Task \(task.identifier)")
-                    }
-
-                    task.execute {
-                        self.taskQueueLock.async {
-                            if self.enablePrintDebug {
-                                self.printDebugInfo("Completed Task \(task.identifier)")
-                            }
-                            self.activeTasks.remove(task.identifier)
-                            self.notifyListeners(for: task.identifier, with: .success(()))
-
-                            // Trigger processing of the next task if possible
-                            self.processNextTask()
-                        }
-                    }
-                } else {
-                    // No more tasks to process
-                    break
+            self.checkAndAgeTasks()
+            while self.activeTasks.count < self.maxConcurrentTasks, let task = self.taskQueue.dequeue() {
+                self.activeTasks.insert(task.identifier)
+                if self.enablePrintDebug {
+                    self.printDebugInfo("Executing \(task.identifier)")
                 }
+                self.prepareAndExecute(task: task)
             }
         }
     }
-
+    
+    /// Checks and ages tasks individually if necessary.
+    private func checkAndAgeTasks() {
+        let currentTime = ProcessInfo.processInfo.systemUptime
+        for index in taskQueue.elements.indices {
+            let task = taskQueue.elements[index]
+            if currentTime - task.creationTime >= agingThreshold {
+                taskQueue.elements[index].priority.age()
+            }
+        }
+        taskQueue.elements.sort(by: { $0.priority > $1.priority })
+    }
 
 
     /// Cancels a task by its identifier.
-   func cancelTask(with identifier: String) {
-       /// Debug print
-       if enablePrintDebug {
-           printDebugInfo("Cancelling Task: \(identifier)")
-       }
-       taskQueueLock.async {
-           // Cancel the task in the queue
-           if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
-               self.taskQueue.elements[index].cancel()
-           }
-           
-           // Cancel the task if it's active
-           if self.activeTasks.contains(identifier) {
-               // TODO: Implement logic to cancel an active task
-               self.activeTasks.remove(identifier)
-           }
-       }
-   }
-    /// Prints debug information including CPU and Memory utilization.
-    private func printDebugInfo(_ message: String) {
-        let cpuLoad = systemLoadManager.getCurrentCpuLoad()
-        let memoryLoad = systemLoadManager.getCurrentMemoryLoad()
+    func cancelTask(with identifier: String) {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+            
+            if let workItem = self.taskWorkItems[identifier] {
+                workItem.cancel()
+                self.taskWorkItems.removeValue(forKey: identifier)
+            }
+            if let index = self.taskQueue.elements.firstIndex(where: { $0.identifier == identifier }) {
+                self.taskQueue.elements.remove(at: index)
+            }
+            self.activeTasks.remove(identifier)
+        }
+    }
 
-        let formattedCpuLoad = String(format: "%.2f%%", cpuLoad * 100)
-        let formattedMemoryLoad = String(format: "%.2f%%", memoryLoad * 100)
+    /// Prints debug information including CPU and Memory utilization.
+    private func printDebugInfo(_ message: String, showLoad: Bool = false) {
         let taskInfo = "\(activeTasks.count)/\(maxConcurrentTasks)"
 
         let labelWidth = 25
         let valueWidth = 10
-
+        
+        let preheader = "......................."
         let header = "SwiftFlow Debug Output:"
+        let header2 = "......................."
         let messageLine = "Message:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + message
-        let cpuLoadLine = "CPU Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedCpuLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
-        let memoryLoadLine = "Memory Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedMemoryLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
         let taskInfoLine = "Active Tasks:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + taskInfo.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
         let queueSizeLine = "Tasks in Queue:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + "\(taskQueue.elements.count)".padding(toLength: valueWidth, withPad: " ", startingAt: 0)
         let footer = String(repeating: "-", count: header.count)
 
-        let debugInfo = [header, messageLine, cpuLoadLine, memoryLoadLine, taskInfoLine, queueSizeLine, footer].joined(separator: "\n")
+        var debugInfo = [preheader, header, header2, messageLine, taskInfoLine, queueSizeLine]
+        
+        /// calling from the system load manager is not preferred as it can become a bottleneck/cpu intensive
+        if showLoad {
+            let cpuLoad = systemLoadManager.getCurrentCpuLoad()
+            let memoryLoad = systemLoadManager.getCurrentMemoryLoad()
 
-        print(debugInfo)
+            let formattedCpuLoad = String(format: "%.2f%%", cpuLoad * 100)
+            let formattedMemoryLoad = String(format: "%.2f%%", memoryLoad * 100)
+
+            let cpuLoadLine = "CPU Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedCpuLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+            let memoryLoadLine = "Memory Load:".padding(toLength: labelWidth, withPad: " ", startingAt: 0) + formattedMemoryLoad.padding(toLength: valueWidth, withPad: " ", startingAt: 0)
+
+            debugInfo.insert(contentsOf: [cpuLoadLine, memoryLoadLine], at: 2)
+        }
+
+        debugInfo.append(footer)
+
+        print(debugInfo.joined(separator: "\n"))
     }
 
 
-    
     /// Notifies registered listeners about the completion of a task.
     private func notifyListeners(for identifier: String, with result: TaskResult<Any>) {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
             self.listeners[identifier]?.forEach { listener in
                 listener(result)
             }
@@ -516,7 +536,9 @@ class SwiftFlow {
         let cpuLoadFactor = configuration.loadFactor(for: configuration.cpuLoadLevel)
         let memoryLoadFactor = configuration.loadFactor(for: configuration.memoryLoadLevel)
 
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
+            
             let oldConcurrentTasks = self.maxConcurrentTasks
             if currentCpuLoad < cpuLoadFactor && currentMemoryLoad < memoryLoadFactor {
                 /// increase allowed concurrent tasks, with a hard limit of active processor count to avoid thread explosions
@@ -549,7 +571,8 @@ class SwiftFlow {
     
     /// Prints the current state of the task queue for debugging purposes.
     func debugPrintQueueStatus() {
-        taskQueueLock.async {
+        taskQueueLock.async { [weak self] in
+            guard let self = self else { return }
             print("========SwiftFlow Debug========")
             print("Current Max Concurrent Tasks: \(self.maxConcurrentTasks)")
             print("Task Queue (In Order):")
